@@ -3,11 +3,9 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Monitor Multiparamétrico — Simulación</title>
+<title>Monitor Multiparamétrico — Sim</title>
 <style>
-  :root {
-    --bg:#000; --grid:#0a2a0a; --text:#e6ffe6; --accent:#33ff99; --red:#ff4d4d; --amber:#ffcc00; --blue:#66ccff;
-  }
+  :root { --bg:#000; --grid:#0a2a0a; --text:#e6ffe6; --accent:#33ff99; --red:#ff4d4d; --amber:#ffcc00; --blue:#66ccff; }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--text);font:14px/1.3 system-ui,Segoe UI,Roboto,Helvetica,Arial}
   header{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#051a05;border-bottom:1px solid #0c320c;position:sticky;top:0;z-index:10}
@@ -21,11 +19,7 @@
   .val{font-size:26px;font-weight:700;letter-spacing:1px}
   .units{font-size:12px;color:#9fe59f;margin-left:6px}
   .ok{color:var(--accent)} .warn{color:var(--amber)} .crit{color:var(--red)}
-  canvas{width:100%;height:140px;display:block;background:linear-gradient(#001500,#001500), #001500;border-radius:6px}
-  .grid{background-image:
-     linear-gradient(rgba(0,64,0,.25) 1px, transparent 1px),
-     linear-gradient(90deg, rgba(0,64,0,.25) 1px, transparent 1px);
-     background-size: 0 0, 40px 40px}
+  canvas{width:100%;height:140px;display:block;background:#001500;border-radius:6px}
   #controls .pane{padding:10px}
   fieldset{border:1px solid #0c320c;border-radius:8px;margin:0 0 10px 0}
   legend{padding:0 8px;color:#9fe59f}
@@ -60,7 +54,7 @@
 <div id="wrap">
   <section id="screens">
     <div class="pane">
-      <canvas id="ecg" class="grid"></canvas>
+      <canvas id="ecg"></canvas>
       <div class="row" style="margin-top:6px">
         <div class="metric"><h3>ECG</h3><span class="val ok" id="hrVal">75</span><span class="units">lpm</span></div>
         <div class="metric"><h3>Rhythm</h3><span class="val" id="rhythmVal">NSR</span></div>
@@ -68,7 +62,7 @@
       </div>
     </div>
     <div class="pane">
-      <canvas id="pleth" class="grid"></canvas>
+      <canvas id="pleth"></canvas>
       <div class="row" style="margin-top:6px">
         <div class="metric"><h3>SpO₂</h3><span class="val ok" id="spoVal">98</span><span class="units">%</span></div>
         <div class="metric"><h3>FR</h3><span class="val ok" id="rrVal">14</span><span class="units">rpm</span></div>
@@ -159,7 +153,7 @@
   const ecg = el('ecg'), pleth = el('pleth');
   const ctxE = ecg.getContext('2d'), ctxP = pleth.getContext('2d');
 
-  // Resize canvas to device pixels
+  // Resize canvas a píxeles reales
   function resizeCanvas(c){
     const dpr = Math.max(1, window.devicePixelRatio || 1);
     c.width = Math.floor(c.clientWidth * dpr);
@@ -172,71 +166,55 @@
   // ---------- WebAudio ----------
   let actx, masterGain, beepGain, alarmOsc, alarmGain;
   function initAudio(){
-    if(actx) return;
-    actx = new (window.AudioContext||window.webkitAudioContext)();
-    masterGain = actx.createGain(); masterGain.gain.value = 0.05; masterGain.connect(actx.destination);
-    // QRS beep
-    beepGain = actx.createGain(); beepGain.gain.value = 0; beepGain.connect(masterGain);
-    const osc = actx.createOscillator(); osc.type='square'; osc.frequency.value=880; osc.connect(beepGain); osc.start();
-    // Alarm
-    alarmGain = actx.createGain(); alarmGain.gain.value = 0; alarmGain.connect(masterGain);
-    alarmOsc = actx.createOscillator(); alarmOsc.type='sawtooth'; alarmOsc.frequency.value=2; alarmOsc.connect(alarmGain); alarmOsc.start();
+    if(!actx){
+      actx = new (window.AudioContext||window.webkitAudioContext)();
+      masterGain = actx.createGain(); masterGain.gain.value = 0.12; masterGain.connect(actx.destination);
+      // QRS beep
+      beepGain = actx.createGain(); beepGain.gain.value = 0; beepGain.connect(masterGain);
+      const osc = actx.createOscillator(); osc.type='square'; osc.frequency.value=880; osc.connect(beepGain); osc.start();
+      // Alarm
+      alarmGain = actx.createGain(); alarmGain.gain.value = 0; alarmGain.connect(masterGain);
+      alarmOsc = actx.createOscillator(); alarmOsc.type='sawtooth'; alarmOsc.frequency.value=2; alarmOsc.connect(alarmGain); alarmOsc.start();
+    }
+    if(actx.state === 'suspended') actx.resume();
   }
-  document.body.addEventListener('click', initAudio, {once:true}); // activar audio al primer click
+  // Despertar audio en más gestos (iOS/Safari)
+  ['click','touchstart','pointerdown','keydown'].forEach(ev =>
+    window.addEventListener(ev, initAudio, {once:true, passive:true})
+  );
 
   // ---------- Señales ----------
   let t0 = performance.now()/1000, lastBeatT = 0, rrJitter=0;
   function sampleECG(t){
-    // Simple generador con picos "QRS" + baseline; varía según ritmo
     const bpm = state.hr;
     const secPerBeat = 60 / Math.max(1,bpm);
     let phase = ((t + rrJitter) % secPerBeat) / secPerBeat;
 
-    // Ritmo irregular (FA): jitter de intervalo RR
     if(state.rhythm==='AF' && phase<0.02){
       rrJitter += (Math.random()*0.15 - 0.075) * secPerBeat;
     }
-
-    // Asistolia
     if(state.rhythm==='ASYSTOLE') return 0.02*(Math.random()-0.5);
 
-    // TV: bpm alto, QRS anchos => forma triangular
     if(state.rhythm==='VT'){
       const tri = 1 - 4*Math.abs(Math.round(phase)-phase);
       return 0.6*tri + 0.05*Math.sin(2*Math.PI*8*t);
     }
-
-    // Sinusal / FA: QRS estrecho con p pequeña y t
     let y = 0.02*Math.sin(2*Math.PI*5*t); // baseline
-    // QRS
-    if(phase>0.0 && phase<0.08){ y += 1.4*Math.exp(-((phase-0.04)**2)/0.0002); }
-    // onda T
-    if(phase>0.25 && phase<0.45){ y += 0.25*Math.sin((phase-0.25)*Math.PI*5); }
-    // ondulación FA
+    if(phase>0.0 && phase<0.08){ y += 1.4*Math.exp(-((phase-0.04)**2)/0.0002); } // QRS
+    if(phase>0.25 && phase<0.45){ y += 0.25*Math.sin((phase-0.25)*Math.PI*5); }  // T
     if(state.rhythm==='AF') y += 0.03*Math.sin(2*Math.PI*40*t);
     return y;
   }
-
   function samplePleth(t){
-    // Onda pleth suave a ~RR de 1 Hz, amplitud cae con SpO₂ baja
     const freq = state.hr/60;
-    const amp = Math.max(0.2, (state.spo-80)/100); // 0.2..0.2+
+    const amp = Math.max(0.2, (state.spo-80)/100);
     return amp*Math.max(0, Math.sin(2*Math.PI*freq*(t-0.15))**2) + 0.02*Math.sin(2*Math.PI*8*t);
   }
-
   function sampleResp(t){
     return 0.3*Math.sin(2*Math.PI*(state.rr/60)*t);
   }
 
-  // ---------- Dibujo ----------
-  let xE = 0, xP = 0;
-  function drawSignal(ctx, value, x, color){
-    const h = ctx.canvas.height, w = ctx.canvas.width;
-    ctx.strokeStyle = color; ctx.lineWidth = 2;
-    if(x===0){ ctx.clearRect(0,0,w,h); drawGrid(ctx); ctx.beginPath(); ctx.moveTo(0,h/2); }
-    const y = h/2 - value * h*0.35;
-    ctx.lineTo(x, y);
-  }
+  // ---------- Dibujo (con stroke por segmento) ----------
   function drawGrid(ctx){
     const w = ctx.canvas.width, h = ctx.canvas.height;
     ctx.save();
@@ -245,6 +223,20 @@
     for(let j=0;j<h;j+=40){ ctx.beginPath(); ctx.moveTo(0,j+0.5); ctx.lineTo(w,j+0.5); ctx.stroke(); }
     ctx.restore();
   }
+  let xE = 0, xP = 0;
+  function drawSignal(ctx, value, x, color){
+    const h = ctx.canvas.height, w = ctx.canvas.width;
+    if(x===0){ ctx.clearRect(0,0,w,h); drawGrid(ctx); ctx._prevY = h/2; }
+    const y = h/2 - value * h*0.35;
+    ctx.strokeStyle = color; ctx.lineWidth = 2;
+    ctx.beginPath();
+    const prevX = Math.max(0, x-2);
+    const prevY = (ctx._prevY === undefined) ? h/2 : ctx._prevY;
+    ctx.moveTo(prevX, prevY);
+    ctx.lineTo(x, y);
+    ctx.stroke();               // <- ¡esto faltaba!
+    ctx._prevY = y;
+  }
 
   // ---------- Alarmas ----------
   function setMessage(txt){ el('msgVal').textContent = txt; }
@@ -252,7 +244,6 @@
     const a = el('alarmVal');
     a.textContent = txt || '—';
     a.className = 'val ' + (level||'');
-    // sonido de alarma si corresponde
     const now = actx ? actx.currentTime : 0;
     if(level && actx && now > state.alarmSilencedUntil){
       alarmGain.gain.cancelScheduledValues(now);
@@ -267,13 +258,13 @@
     if(actx) alarmGain.gain.setTargetAtTime(0, now, 0.05);
   }
 
-  // ---------- NIBP sim ----------
+  // ---------- NIBP ----------
   function scheduleNibp(){
     const now = performance.now()/1000;
     state.nibp.nextAt = now + state.nibp.interval;
     el('nibpClock').textContent = 'en ' + state.nibp.interval + ' s';
   }
-  function tickNibp(dt){
+  function tickNibp(){
     const now = performance.now()/1000;
     const rem = Math.max(0, state.nibp.nextAt - now);
     el('nibpClock').textContent = rem>1 ? ('en ' + Math.floor(rem) + ' s') : 'ahora';
@@ -293,51 +284,45 @@
     if(!state.paused){
       const t = (performance.now()/1000 - t0) * state.speed;
 
-      // ECG
-      const valE = sampleECG(t);
-      drawSignal(ctxE, valE, xE, '#39ff14');
-      xE += 2; if(xE >= ctxE.canvas.width){ xE=0; ctxE.beginPath(); ctxE.moveTo(0,ctxE.canvas.height/2); }
+      drawSignal(ctxE, sampleECG(t), xE, '#39ff14');
+      xE += 2; if(xE >= ctxE.canvas.width){ xE=0; }
 
-      // Beep QRS: detectar cruce por umbral en sinusal/FA/TV (no asistolia)
+      const plethV = samplePleth(t) + sampleResp(t)*0.2;
+      drawSignal(ctxP, plethV, xP, '#66ccff');
+      xP += 2; if(xP >= ctxP.canvas.width){ xP=0; }
+
+      // Beep por QRS
       if(['NSR','AF','VT'].includes(state.rhythm)){
         const secPerBeat = 60/Math.max(1,state.hr);
         const nowSec = t;
         if(nowSec - lastBeatT >= secPerBeat){
           lastBeatT = nowSec;
-          if(actx){ beepGain.gain.cancelScheduledValues(actx.currentTime);
-            beepGain.gain.setValueAtTime(0.3, actx.currentTime);
-            beepGain.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime+0.04);
+          if(actx){
+            const now = actx.currentTime;
+            beepGain.gain.cancelScheduledValues(now);
+            beepGain.gain.setValueAtTime(0.35, now);
+            beepGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.05);
           }
-          // parpadeo HR
           el('hrVal').classList.add('blinker');
           setTimeout(()=>el('hrVal').classList.remove('blinker'),120);
         }
       }
-
-      // Pleth + respiración
-      const valP = samplePleth(t) + sampleResp(t)*0.2;
-      drawSignal(ctxP, valP, xP, '#66ccff');
-      xP += 2; if(xP >= ctxP.canvas.width){ xP=0; ctxP.beginPath(); ctxP.moveTo(0,ctxP.canvas.height/2); }
     }
 
-    // NIBP
     tickNibp();
 
-    // Numeros + color segun rangos
+    // Números + color
     el('hrVal').textContent = Math.round(state.hr);
     el('spoVal').textContent = Math.round(state.spo);
     el('rrVal').textContent = Math.round(state.rr);
-    el('tempVal').textContent = state.temp.toFixed(1);
+    el('tempVal').textContent = Number(state.temp).toFixed(1);
     el('rhythmVal').textContent = state.rhythm;
-
-    // Color
     const hrC = state.hr<state.thresholds.hrMin||state.hr>state.thresholds.hrMax ? 'crit' : 'ok';
     const spoC = state.spo<state.thresholds.spoMin ? 'crit' : 'ok';
     const sbpC = state.sbp<state.thresholds.sbpMin ? 'warn' : 'ok';
     el('hrVal').className = 'val ' + hrC;
     el('spoVal').className = 'val ' + spoC;
 
-    // Mensajes/Alarmas
     let alarmTxt='', level='';
     if(state.rhythm==='ASYSTOLE'){ alarmTxt='ASISTOLIA'; level='crit'; }
     else if(hrC==='crit'){ alarmTxt = state.hr<state.thresholds.hrMin?'BRADICARDIA':'TAQUICARDIA'; level='warn'; }
@@ -349,9 +334,16 @@
   }
   scheduleNibp(); anim();
 
-  // ---------- UI bindings ----------
-  const bind = (id, fn)=>{ const e=el(id); const show=el(id+'Show');
-    const upd=()=>{ const v=(id==='temp'?parseFloat:e.type==='range'?Number(e.value):e.value); fn(v); if(show) show.textContent = e.type==='range' && id!=='temp'? Math.round(v): String(v); };
+  // ---------- Bindings ----------
+  const bind = (id, fn)=>{
+    const e=el(id), show=el(id+'Show');
+    const upd=()=>{
+      const v = (id==='temp')
+        ? parseFloat(e.value)     // <- FIX: ahora sí se llama
+        : (e.type==='range' ? Number(e.value) : e.value);
+      fn(v);
+      if(show) show.textContent = (e.type==='range' && id!=='temp') ? Math.round(v) : String(v);
+    };
     e.addEventListener('input', upd); upd();
   };
   bind('hr', v=>state.hr=v);
@@ -391,7 +383,6 @@
   el('presetParo').addEventListener('click', ()=>{
     Object.assign(state,{hr:0,spo:0,rr:0,sbp:60,dbp:30,rhythm:'ASYSTOLE'}); setMessage('Escenario: Paro cardiorrespiratorio');
   });
-
 })();
 </script>
 </body>
