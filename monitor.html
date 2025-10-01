@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Monitor Multiparamétrico — Simulación</title>
+<style>
+  :root {
+    --bg:#000; --grid:#0a2a0a; --text:#e6ffe6; --accent:#33ff99; --red:#ff4d4d; --amber:#ffcc00; --blue:#66ccff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.3 system-ui,Segoe UI,Roboto,Helvetica,Arial}
+  header{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#051a05;border-bottom:1px solid #0c320c;position:sticky;top:0;z-index:10}
+  header h1{margin:0;font-weight:600;font-size:16px;color:var(--accent)}
+  #wrap{display:grid;grid-template-columns: 1.4fr 1fr;gap:10px;padding:10px}
+  #screens{display:grid;gap:10px}
+  .pane{background:#020; border:1px solid #083108; border-radius:8px; padding:8px}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .metric{min-width:150px;flex:1;padding:6px 8px;border-radius:6px;background:#031b03;border:1px solid #0c320c}
+  .metric h3{margin:0 0 4px 0;font-size:13px;color:#9fe59f;font-weight:600}
+  .val{font-size:26px;font-weight:700;letter-spacing:1px}
+  .units{font-size:12px;color:#9fe59f;margin-left:6px}
+  .ok{color:var(--accent)} .warn{color:var(--amber)} .crit{color:var(--red)}
+  canvas{width:100%;height:140px;display:block;background:linear-gradient(#001500,#001500), #001500;border-radius:6px}
+  .grid{background-image:
+     linear-gradient(rgba(0,64,0,.25) 1px, transparent 1px),
+     linear-gradient(90deg, rgba(0,64,0,.25) 1px, transparent 1px);
+     background-size: 0 0, 40px 40px}
+  #controls .pane{padding:10px}
+  fieldset{border:1px solid #0c320c;border-radius:8px;margin:0 0 10px 0}
+  legend{padding:0 8px;color:#9fe59f}
+  label{display:grid;grid-template-columns:140px 1fr 60px;align-items:center;gap:8px;margin:6px 0}
+  input[type=range]{width:100%}
+  select,button{background:#032503;color:var(--text);border:1px solid #0c320c;border-radius:6px;padding:6px 10px}
+  button{cursor:pointer}
+  button.danger{border-color:#3a0000;background:#220000;color:#ffb3b3}
+  small.muted{color:#9fe59f;opacity:.8}
+  footer{padding:8px 12px;color:#9fe59f;opacity:.8}
+  .blinker{animation:blink 1s step-end infinite}
+  @keyframes blink{50%{opacity:.2}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Monitor Multiparamétrico — Sim</h1>
+  <div class="row">
+    <button id="presetNormal">Normal</button>
+    <button id="presetTaq">Taquicardia</button>
+    <button id="presetFA">FA</button>
+    <button id="presetHipox">Hipoxemia</button>
+    <button id="presetParo" class="danger">Paro</button>
+    <button id="pauseBtn">Pausar</button>
+    <label style="display:flex;align-items:center;gap:6px;margin:0 0 0 10px">
+      Velocidad
+      <input id="speed" type="range" min="0.25" max="2" step="0.25" value="1" />
+    </label>
+  </div>
+</header>
+
+<div id="wrap">
+  <section id="screens">
+    <div class="pane">
+      <canvas id="ecg" class="grid"></canvas>
+      <div class="row" style="margin-top:6px">
+        <div class="metric"><h3>ECG</h3><span class="val ok" id="hrVal">75</span><span class="units">lpm</span></div>
+        <div class="metric"><h3>Rhythm</h3><span class="val" id="rhythmVal">NSR</span></div>
+        <div class="metric"><h3>Alarma</h3><span class="val" id="alarmVal">—</span></div>
+      </div>
+    </div>
+    <div class="pane">
+      <canvas id="pleth" class="grid"></canvas>
+      <div class="row" style="margin-top:6px">
+        <div class="metric"><h3>SpO₂</h3><span class="val ok" id="spoVal">98</span><span class="units">%</span></div>
+        <div class="metric"><h3>FR</h3><span class="val ok" id="rrVal">14</span><span class="units">rpm</span></div>
+        <div class="metric"><h3>Temp</h3><span class="val" id="tempVal">36.6</span><span class="units">°C</span></div>
+      </div>
+    </div>
+    <div class="pane">
+      <div class="row">
+        <div class="metric"><h3>NIBP (no invasiva)</h3>
+          <span class="val ok" id="bpVal">120/75</span><span class="units">mmHg</span>
+          <div><small class="muted">Próxima medición: <span id="nibpClock">—</span></small></div>
+        </div>
+        <div class="metric"><h3>Mensaje</h3><span class="val" id="msgVal">Listo</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="controls">
+    <div class="pane">
+      <fieldset>
+        <legend>Parámetros</legend>
+        <label>Frecuencia Cardíaca
+          <input id="hr" type="range" min="20" max="180" value="75" />
+          <span id="hrShow">75</span>
+        </label>
+        <label>SpO₂ (%)
+          <input id="spo" type="range" min="50" max="100" value="98" />
+          <span id="spoShow">98</span>
+        </label>
+        <label>FR (rpm)
+          <input id="rr" type="range" min="6" max="40" value="14" />
+          <span id="rrShow">14</span>
+        </label>
+        <label>Temp (°C)
+          <input id="temp" type="range" min="30" max="41" step="0.1" value="36.6" />
+          <span id="tempShow">36.6</span>
+        </label>
+        <label>PA sistólica (mmHg)
+          <input id="sbp" type="range" min="60" max="220" value="120" />
+          <span id="sbpShow">120</span>
+        </label>
+        <label>PA diastólica (mmHg)
+          <input id="dbp" type="range" min="30" max="140" value="75" />
+          <span id="dbpShow">75</span>
+        </label>
+        <label>Ritmo
+          <select id="rhythm">
+            <option value="NSR">Sinusal</option>
+            <option value="AF">FA</option>
+            <option value="VT">TV</option>
+            <option value="ASYSTOLE">Asistolia</option>
+          </select>
+          <span></span>
+        </label>
+      </fieldset>
+      <fieldset>
+        <legend>Alarmas</legend>
+        <label>HR min <input id="hrMin" type="range" min="20" max="70" value="50" /><span id="hrMinShow">50</span></label>
+        <label>HR max <input id="hrMax" type="range" min="90" max="200" value="120" /><span id="hrMaxShow">120</span></label>
+        <label>SpO₂ min <input id="spoMin" type="range" min="50" max="98" value="92" /><span id="spoMinShow">92</span></label>
+        <label>PA sist. min <input id="sbpMin" type="range" min="60" max="140" value="90" /><span id="sbpMinShow">90</span></label>
+      </fieldset>
+      <div class="row">
+        <button id="nibpNow">Medir NIBP ahora</button>
+        <button id="silence">Silenciar 30 s</button>
+        <small class="muted">Simulación educativa. No usar para diagnóstico.</small>
+      </div>
+    </div>
+  </section>
+</div>
+
+<footer>
+  © Centro de Simulación — Demo HTML5. Beep QRS y alarmas generados con WebAudio.
+</footer>
+
+<script>
+(function(){
+  // ---------- Estado ----------
+  const state = {
+    hr:75, spo:98, rr:14, temp:36.6, sbp:120, dbp:75, rhythm:"NSR",
+    alarmSilencedUntil:0, speed:1, paused:false,
+    thresholds:{hrMin:50, hrMax:120, spoMin:92, sbpMin:90},
+    nibp:{nextAt:0, interval:90, measuring:false}
+  };
+
+  // ---------- UI refs ----------
+  const el = id => document.getElementById(id);
+  const ecg = el('ecg'), pleth = el('pleth');
+  const ctxE = ecg.getContext('2d'), ctxP = pleth.getContext('2d');
+
+  // Resize canvas to device pixels
+  function resizeCanvas(c){
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    c.width = Math.floor(c.clientWidth * dpr);
+    c.height = Math.floor(c.clientHeight * dpr);
+    return dpr;
+  }
+  let dprE = resizeCanvas(ecg), dprP = resizeCanvas(pleth);
+  window.addEventListener('resize', ()=>{ dprE=resizeCanvas(ecg); dprP=resizeCanvas(pleth); });
+
+  // ---------- WebAudio ----------
+  let actx, masterGain, beepGain, alarmOsc, alarmGain;
+  function initAudio(){
+    if(actx) return;
+    actx = new (window.AudioContext||window.webkitAudioContext)();
+    masterGain = actx.createGain(); masterGain.gain.value = 0.05; masterGain.connect(actx.destination);
+    // QRS beep
+    beepGain = actx.createGain(); beepGain.gain.value = 0; beepGain.connect(masterGain);
+    const osc = actx.createOscillator(); osc.type='square'; osc.frequency.value=880; osc.connect(beepGain); osc.start();
+    // Alarm
+    alarmGain = actx.createGain(); alarmGain.gain.value = 0; alarmGain.connect(masterGain);
+    alarmOsc = actx.createOscillator(); alarmOsc.type='sawtooth'; alarmOsc.frequency.value=2; alarmOsc.connect(alarmGain); alarmOsc.start();
+  }
+  document.body.addEventListener('click', initAudio, {once:true}); // activar audio al primer click
+
+  // ---------- Señales ----------
+  let t0 = performance.now()/1000, lastBeatT = 0, rrJitter=0;
+  function sampleECG(t){
+    // Simple generador con picos "QRS" + baseline; varía según ritmo
+    const bpm = state.hr;
+    const secPerBeat = 60 / Math.max(1,bpm);
+    let phase = ((t + rrJitter) % secPerBeat) / secPerBeat;
+
+    // Ritmo irregular (FA): jitter de intervalo RR
+    if(state.rhythm==='AF' && phase<0.02){
+      rrJitter += (Math.random()*0.15 - 0.075) * secPerBeat;
+    }
+
+    // Asistolia
+    if(state.rhythm==='ASYSTOLE') return 0.02*(Math.random()-0.5);
+
+    // TV: bpm alto, QRS anchos => forma triangular
+    if(state.rhythm==='VT'){
+      const tri = 1 - 4*Math.abs(Math.round(phase)-phase);
+      return 0.6*tri + 0.05*Math.sin(2*Math.PI*8*t);
+    }
+
+    // Sinusal / FA: QRS estrecho con p pequeña y t
+    let y = 0.02*Math.sin(2*Math.PI*5*t); // baseline
+    // QRS
+    if(phase>0.0 && phase<0.08){ y += 1.4*Math.exp(-((phase-0.04)**2)/0.0002); }
+    // onda T
+    if(phase>0.25 && phase<0.45){ y += 0.25*Math.sin((phase-0.25)*Math.PI*5); }
+    // ondulación FA
+    if(state.rhythm==='AF') y += 0.03*Math.sin(2*Math.PI*40*t);
+    return y;
+  }
+
+  function samplePleth(t){
+    // Onda pleth suave a ~RR de 1 Hz, amplitud cae con SpO₂ baja
+    const freq = state.hr/60;
+    const amp = Math.max(0.2, (state.spo-80)/100); // 0.2..0.2+
+    return amp*Math.max(0, Math.sin(2*Math.PI*freq*(t-0.15))**2) + 0.02*Math.sin(2*Math.PI*8*t);
+  }
+
+  function sampleResp(t){
+    return 0.3*Math.sin(2*Math.PI*(state.rr/60)*t);
+  }
+
+  // ---------- Dibujo ----------
+  let xE = 0, xP = 0;
+  function drawSignal(ctx, value, x, color){
+    const h = ctx.canvas.height, w = ctx.canvas.width;
+    ctx.strokeStyle = color; ctx.lineWidth = 2;
+    if(x===0){ ctx.clearRect(0,0,w,h); drawGrid(ctx); ctx.beginPath(); ctx.moveTo(0,h/2); }
+    const y = h/2 - value * h*0.35;
+    ctx.lineTo(x, y);
+  }
+  function drawGrid(ctx){
+    const w = ctx.canvas.width, h = ctx.canvas.height;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(0,128,0,0.25)'; ctx.lineWidth = 1;
+    for(let i=0;i<w;i+=40) { ctx.beginPath(); ctx.moveTo(i+0.5,0); ctx.lineTo(i+0.5,h); ctx.stroke(); }
+    for(let j=0;j<h;j+=40){ ctx.beginPath(); ctx.moveTo(0,j+0.5); ctx.lineTo(w,j+0.5); ctx.stroke(); }
+    ctx.restore();
+  }
+
+  // ---------- Alarmas ----------
+  function setMessage(txt){ el('msgVal').textContent = txt; }
+  function setAlarm(txt, level){
+    const a = el('alarmVal');
+    a.textContent = txt || '—';
+    a.className = 'val ' + (level||'');
+    // sonido de alarma si corresponde
+    const now = actx ? actx.currentTime : 0;
+    if(level && actx && now > state.alarmSilencedUntil){
+      alarmGain.gain.cancelScheduledValues(now);
+      alarmGain.gain.setTargetAtTime(level==='crit'?0.4:0.15, now, 0.05);
+    } else if (actx) {
+      alarmGain.gain.setTargetAtTime(0, now, 0.05);
+    }
+  }
+  function silence(sec=30){
+    const now = actx ? actx.currentTime : 0;
+    state.alarmSilencedUntil = now + sec;
+    if(actx) alarmGain.gain.setTargetAtTime(0, now, 0.05);
+  }
+
+  // ---------- NIBP sim ----------
+  function scheduleNibp(){
+    const now = performance.now()/1000;
+    state.nibp.nextAt = now + state.nibp.interval;
+    el('nibpClock').textContent = 'en ' + state.nibp.interval + ' s';
+  }
+  function tickNibp(dt){
+    const now = performance.now()/1000;
+    const rem = Math.max(0, state.nibp.nextAt - now);
+    el('nibpClock').textContent = rem>1 ? ('en ' + Math.floor(rem) + ' s') : 'ahora';
+    if(!state.nibp.measuring && now >= state.nibp.nextAt){
+      state.nibp.measuring = true; setMessage('Midiendo PA…');
+      setTimeout(()=>{
+        const sbp = state.sbp + (Math.random()*6-3);
+        const dbp = state.dbp + (Math.random()*6-3);
+        el('bpVal').textContent = Math.round(sbp)+'/'+Math.round(dbp);
+        state.nibp.measuring = false; setMessage('Listo'); scheduleNibp();
+      }, 2000/state.speed);
+    }
+  }
+
+  // ---------- Loop ----------
+  function anim(){
+    if(!state.paused){
+      const t = (performance.now()/1000 - t0) * state.speed;
+
+      // ECG
+      const valE = sampleECG(t);
+      drawSignal(ctxE, valE, xE, '#39ff14');
+      xE += 2; if(xE >= ctxE.canvas.width){ xE=0; ctxE.beginPath(); ctxE.moveTo(0,ctxE.canvas.height/2); }
+
+      // Beep QRS: detectar cruce por umbral en sinusal/FA/TV (no asistolia)
+      if(['NSR','AF','VT'].includes(state.rhythm)){
+        const secPerBeat = 60/Math.max(1,state.hr);
+        const nowSec = t;
+        if(nowSec - lastBeatT >= secPerBeat){
+          lastBeatT = nowSec;
+          if(actx){ beepGain.gain.cancelScheduledValues(actx.currentTime);
+            beepGain.gain.setValueAtTime(0.3, actx.currentTime);
+            beepGain.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime+0.04);
+          }
+          // parpadeo HR
+          el('hrVal').classList.add('blinker');
+          setTimeout(()=>el('hrVal').classList.remove('blinker'),120);
+        }
+      }
+
+      // Pleth + respiración
+      const valP = samplePleth(t) + sampleResp(t)*0.2;
+      drawSignal(ctxP, valP, xP, '#66ccff');
+      xP += 2; if(xP >= ctxP.canvas.width){ xP=0; ctxP.beginPath(); ctxP.moveTo(0,ctxP.canvas.height/2); }
+    }
+
+    // NIBP
+    tickNibp();
+
+    // Numeros + color segun rangos
+    el('hrVal').textContent = Math.round(state.hr);
+    el('spoVal').textContent = Math.round(state.spo);
+    el('rrVal').textContent = Math.round(state.rr);
+    el('tempVal').textContent = state.temp.toFixed(1);
+    el('rhythmVal').textContent = state.rhythm;
+
+    // Color
+    const hrC = state.hr<state.thresholds.hrMin||state.hr>state.thresholds.hrMax ? 'crit' : 'ok';
+    const spoC = state.spo<state.thresholds.spoMin ? 'crit' : 'ok';
+    const sbpC = state.sbp<state.thresholds.sbpMin ? 'warn' : 'ok';
+    el('hrVal').className = 'val ' + hrC;
+    el('spoVal').className = 'val ' + spoC;
+
+    // Mensajes/Alarmas
+    let alarmTxt='', level='';
+    if(state.rhythm==='ASYSTOLE'){ alarmTxt='ASISTOLIA'; level='crit'; }
+    else if(hrC==='crit'){ alarmTxt = state.hr<state.thresholds.hrMin?'BRADICARDIA':'TAQUICARDIA'; level='warn'; }
+    if(spoC==='crit'){ alarmTxt = (alarmTxt?alarmTxt+' · ':'') + 'SpO₂ BAJA'; level='crit'; }
+    if(sbpC==='warn'){ alarmTxt = (alarmTxt?alarmTxt+' · ':'') + 'PA BAJA'; level = level||'warn'; }
+    setAlarm(alarmTxt, level);
+
+    requestAnimationFrame(anim);
+  }
+  scheduleNibp(); anim();
+
+  // ---------- UI bindings ----------
+  const bind = (id, fn)=>{ const e=el(id); const show=el(id+'Show');
+    const upd=()=>{ const v=(id==='temp'?parseFloat:e.type==='range'?Number(e.value):e.value); fn(v); if(show) show.textContent = e.type==='range' && id!=='temp'? Math.round(v): String(v); };
+    e.addEventListener('input', upd); upd();
+  };
+  bind('hr', v=>state.hr=v);
+  bind('spo', v=>state.spo=v);
+  bind('rr', v=>state.rr=v);
+  bind('temp', v=>state.temp=v);
+  bind('sbp', v=>state.sbp=v);
+  bind('dbp', v=>state.dbp=v);
+  el('rhythm').addEventListener('change', e=>state.rhythm=e.target.value);
+
+  bind('hrMin', v=>state.thresholds.hrMin=v);
+  bind('hrMax', v=>state.thresholds.hrMax=v);
+  bind('spoMin', v=>state.thresholds.spoMin=v);
+  bind('sbpMin', v=>state.thresholds.sbpMin=v);
+
+  el('speed').addEventListener('input', e=>state.speed=Number(e.target.value));
+  el('pauseBtn').addEventListener('click', ()=>{
+    state.paused=!state.paused;
+    el('pauseBtn').textContent = state.paused?'Reanudar':'Pausar';
+  });
+  el('nibpNow').addEventListener('click', ()=>{ state.nibp.nextAt = performance.now()/1000; });
+  el('silence').addEventListener('click', ()=>silence(30));
+
+  // Presets
+  el('presetNormal').addEventListener('click', ()=>{
+    Object.assign(state,{hr:75,spo:98,rr:14,temp:36.6,sbp:120,dbp:75,rhythm:'NSR'}); setMessage('Escenario: Normal');
+  });
+  el('presetTaq').addEventListener('click', ()=>{
+    Object.assign(state,{hr:140,spo:97,rr:22,sbp:105,dbp:65,rhythm:'NSR'}); setMessage('Escenario: Taquicardia sinusal');
+  });
+  el('presetFA').addEventListener('click', ()=>{
+    Object.assign(state,{hr:120,spo:96,rr:18,sbp:110,dbp:70,rhythm:'AF'}); setMessage('Escenario: FA con respuesta rápida');
+  });
+  el('presetHipox').addEventListener('click', ()=>{
+    Object.assign(state,{hr:110,spo:86,rr:28,sbp:100,dbp:60,rhythm:'NSR'}); setMessage('Escenario: Hipoxemia');
+  });
+  el('presetParo').addEventListener('click', ()=>{
+    Object.assign(state,{hr:0,spo:0,rr:0,sbp:60,dbp:30,rhythm:'ASYSTOLE'}); setMessage('Escenario: Paro cardiorrespiratorio');
+  });
+
+})();
+</script>
+</body>
+</html>
